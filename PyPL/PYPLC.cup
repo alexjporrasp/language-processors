@@ -1,0 +1,239 @@
+import java_cup.runtime.*;
+
+parser code {:
+  @Override
+  public void report_error(String message, Object info) {
+    Gen.error();
+    PYPLC.out.println("\t# Syntax error.");
+  }
+:}
+
+// terminals
+// operators
+terminal PLUS, MINUS, TIMES, DIVIDE, EQUAL, UMINUS, POWER, MOD;
+
+// separators
+terminal LPAREN, RPAREN, SEMI, COLON, COMMA;
+
+// reserved words
+terminal IF, ELIF, ELSE;
+terminal WHILE;
+terminal PRINT;
+terminal String FOR;
+terminal IN, RANGE;
+
+// block
+terminal INDENT, DEDENT;
+terminal FULLSTOP;
+terminal NEWLINE;
+
+// Identifiers
+terminal String IDENT;
+
+// Numbers
+terminal String INTEGER;
+
+// Boolean operators
+terminal LESS, MORE, BEQ, NEQ, LEQ, MOEQ;
+
+
+// non terminals
+non terminal sent_list;
+non terminal sent;
+non terminal String expression;
+non terminal DoubleTag cond;
+non terminal opt_else;
+
+
+// precedences
+precedence left  COMMA;
+precedence right EQUAL;
+precedence left  PLUS, MINUS;
+precedence left  TIMES, DIVIDE, MOD;
+precedence left  POWER;
+precedence left  UMINUS;
+precedence left  IF;
+precedence left ELIF;
+precedence left  ELSE;
+
+// The grammar
+sent_list		::= sent | sent_list sent;
+
+sent				::= expression:e NEWLINE
+							| PRINT expression:e NEWLINE
+							{:
+								Gen._print(e);
+							:}
+							| INDENT sent_list DEDENT
+							| IF cond:c COLON NEWLINE
+							{:
+								Gen.label(c.getT());
+								RESULT = Gen.genTag();
+							:}
+							sent
+							{:
+								Gen._goto((String) RESULT);
+								Gen.label(c.getF());
+							:}
+							opt_else
+							{:
+								Gen.label((String) RESULT);
+							:}
+							| WHILE
+							{:
+								RESULT = Gen.genTag();
+								Gen.label((String) RESULT);
+							:}
+							cond:c COLON NEWLINE
+							{:
+								Gen.label(c.getT());
+							:}
+							sent
+							{:
+								Gen._goto((String) RESULT);
+								Gen.label(c.getF());
+							:}
+							| FOR:l IDENT:i IN RANGE LPAREN INTEGER:n1 COMMA INTEGER:n2 RPAREN COLON NEWLINE
+							{:
+								VarTable.addVar(i);
+								Gen.asig(i, n1);
+								Gen.label(l);
+								RESULT = Gen.cond(Gen.LESS, i, n2);
+								Gen.label(((DoubleTag) RESULT).getT());
+							:}
+							sent
+							{:
+								Gen.operate(i, i, "+", "1");
+								Gen._goto(l);
+								Gen.label(((DoubleTag) RESULT).getF());
+							:}
+							;
+
+opt_else		::= ELIF cond:c COLON NEWLINE
+							{:
+								Gen.label(c.getT());
+								RESULT = Gen.genTag();
+							:}
+							sent
+							{:
+								Gen._goto((String) RESULT);
+								Gen.label(c.getF());
+							:}
+							opt_else
+							{:
+								Gen.label((String) RESULT);
+							:}
+							| ELSE COLON NEWLINE sent
+							| /*EPSILON*/
+							;
+
+expression  ::= expression:e1 PLUS   expression:e2
+              {:
+                String t = Gen.genTemp();
+                Gen.operate(t,e1,"+",e2);
+                RESULT = t;
+              :}
+              | expression:e1 MINUS  expression:e2
+              {:
+                String t = Gen.genTemp();
+                Gen.operate(t,e1,"-",e2);
+                RESULT = t;
+              :}
+              | expression:e1 TIMES  expression:e2
+              {:
+                String t = Gen.genTemp();
+                Gen.operate(t,e1,"*",e2);
+                RESULT = t;
+              :}
+              | expression:e1 DIVIDE expression:e2
+              {:
+                String t = Gen.genTemp();
+                Gen.operate(t,e1,"/",e2);
+                RESULT = t;
+              :}
+              | expression:e1 MOD expression:e2
+							{:
+								String t0 = Gen.genTemp();
+	              String t1 = Gen.genTemp();
+	              String t2 = Gen.genTemp();
+	              Gen.operate(t0, e1, "/", e2);
+	              Gen.operate(t1, t0, "*", e2);
+	              Gen.operate(t2, e1, "-", t1);
+	              RESULT = t2;
+							:}
+              | expression:e1 POWER  expression:e2
+							{:
+								String t0 = Gen.genTemp();
+								String t1 = Gen.genTemp();
+								Gen.asig(t0, "0");
+								Gen.asig(t1, "1");
+								String l = Gen.genTag();
+								Gen.label(l);
+								DoubleTag cond = Gen.cond(Gen.LESS, t0, e2);
+								Gen.label(cond.getT());
+								Gen.operate(t1,t1,"*",e1);
+								Gen.operate(t0,t0,"+","1");
+								Gen._goto(l);
+								Gen.label(cond.getF());
+								RESULT = t1;
+							:}
+							| MINUS expression:e
+							{:
+								String t = Gen.genTemp();
+								Gen.operate(t,e,"*", "2");
+								Gen.operate(t,e,"-", t);
+								RESULT = t;
+							:} %prec UMINUS
+              | LPAREN expression:e RPAREN
+              {:
+                RESULT = e;
+              :}
+              | IDENT:i
+              {:
+								if (!VarTable.isDeclared(i)) {
+									Gen.error();
+									PYPLC.out.println("\t# variable not initialized.");
+									Gen.halt();
+								}
+                RESULT = i;
+              :}
+              | IDENT:i EQUAL expression:e
+              {:
+								VarTable.addVar(i);
+                Gen.asig(i, e);
+              :}
+              | INTEGER:n
+              {:
+                RESULT = n;
+              :}
+              ;
+
+cond        ::= expression:e1 LESS expression:e2
+              {:
+                RESULT = Gen.cond(Gen.LESS, e1, e2);
+              :}
+              | expression:e1 MORE expression:e2
+              {:
+                RESULT = Gen.cond(Gen.MORE, e1, e2);
+              :}
+              | expression:e1 LEQ expression:e2
+              {:
+                RESULT = Gen.cond(Gen.LEQ, e1, e2);
+              :}
+              | expression:e1 MOEQ expression:e2
+              {:
+                RESULT = Gen.cond(Gen.MOEQ, e1, e2);
+              :}
+              | expression:e1 BEQ expression:e2
+              {:
+                RESULT = Gen.cond(Gen.EQ, e1, e2);
+              :}
+              | expression:e1 NEQ expression:e2
+              {:
+                RESULT = Gen.cond(Gen.NEQ, e1, e2);
+              :}
+              | LPAREN cond:c RPAREN
+              {:
+                RESULT = c;
+              :}
+              ;

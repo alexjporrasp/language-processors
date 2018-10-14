@@ -1,0 +1,453 @@
+// @author Alex J. Porras
+// University of Malaga, Spain
+// Language Processors
+
+import java_cup.runtime.*;
+import java.util.*;
+
+action code {:
+  // Use this part in case you need to
+  // declare global variables or something like that
+	List<Tuple<String, String>> list = new ArrayList<Tuple<String, String>>();
+
+:};
+
+parser code {:
+  @Override
+  public void report_error(String message, Object info){      // Syntax error handling message
+      Gen.error();
+      PLXC.out.println("\t# Syntax error");
+      Gen.halt();
+  }
+:}
+
+// terminals
+terminal SEMI;
+terminal IF;
+terminal ELSE;
+terminal LPAREN, RPAREN;
+terminal PRINT;
+terminal LCURLY, RCURLY;
+terminal PLUS, MINUS, TIMES, DIVIDE, UMINUS;
+terminal EQUAL, NOT, MORE, LESS, MOEQ, LEQ, NEQ;
+terminal AND, OR;
+terminal BEQUAL;
+terminal String WHILE, DO;
+terminal String IDENT;
+terminal String INTEGER;
+terminal DoubleTag FOR;
+
+// 2015
+terminal INT, FLOAT;
+terminal COMMA;
+terminal LSQU, RSQU;
+terminal CASTINT, CASTFLOAT;
+terminal IN;
+terminal TRUE, FALSE;
+terminal MOD;
+terminal String REAL;
+
+// non terminals
+non terminal sent_list;
+non terminal sent;
+non terminal else_sent;
+non terminal Tuple<String, String> expression;
+non terminal DoubleTag condition;
+
+non terminal Tuple<String, String> variable;
+non terminal Tuple<String, String> number;
+non terminal Tuple<String, String> uni_op;
+non terminal Tuple<String, String> bin_op;
+non terminal String for_var;
+non terminal Tuple<String, String> asig;
+non terminal Tuple<String, String> sub_exp;
+
+// 2014
+non terminal String type;
+non terminal Tuple<String, String> cast;
+non terminal array_dec;
+non terminal exp_list;
+
+// precedences
+precedence right EQUAL;
+precedence left  PLUS, MINUS;
+precedence left  TIMES, DIVIDE, MOD;
+precedence left  OR;
+precedence left  AND;
+precedence left  MORE, LESS;
+precedence left  IF;
+precedence left  ELSE;
+precedence left CASTINT, CASTFLOAT;
+precedence right NOT, UMINUS; // unitary minus
+
+// the grammar
+sent_list ::= sent | sent_list sent;
+
+sent      ::= expression SEMI
+            | IF LPAREN condition:c RPAREN
+              {:
+                Gen.label(c.getT());
+                RESULT = Gen.genTag();
+              :}
+              sent
+              {:
+                Gen._goto((String) RESULT);
+                Gen.label(c.getF());
+              :}
+              else_sent
+              {:
+                Gen.label((String) RESULT);
+              :}
+            | WHILE:check LPAREN // check comes from lexer
+              {:
+                Gen.label(check);
+              :}
+              condition:c RPAREN
+              {:
+                Gen.label(c.getT());
+              :}
+              sent
+              {:
+                Gen._goto(check);
+                Gen.label(c.getF()); // out of the loop
+              :}
+            | DO:tag
+              {:
+                Gen.label(tag);
+              :}
+              sent WHILE LPAREN
+              condition:c RPAREN SEMI
+              {:
+                Gen.label(c.getT());
+                Gen._goto(tag);
+                Gen.label(c.getF()); // out of the loop
+              :}
+            | FOR:tag LPAREN for_var SEMI  // tag comes from lexer
+              {:
+                Gen.label(tag.getT()); // check condition
+              :}
+              condition:c SEMI
+              {:
+                Gen.label(tag.getF()); // modify variable
+              :}
+              expression
+              {:
+                Gen._goto(tag.getT());
+                Gen.label(c.getT());
+              :}
+              RPAREN sent
+              {:
+                Gen._goto(tag.getF());
+                Gen.label(c.getF()); // out of the loop
+              :}
+						| FOR:tag variable:v IN IDENT:id DO
+						{:
+							String t0 = Gen.genTemp();
+							PLXC.out.println("\t" + t0 + " = -1;");
+							Gen.label(tag.getT());
+							PLXC.out.println("\t" + t0 + " = " + t0 + " + 1;");
+							RESULT = new DoubleTag();
+							DoubleTag db = (DoubleTag) RESULT;
+							PLXC.out.println("\tif (" + t0 + " < " + VarTable.getSize(id) + ") goto " + db.getT() +";");
+							Gen._goto(db.getF());
+							Gen.label(db.getT());
+							PLXC.out.println("\t" + v._1() + " = " + id + "[" + t0 + "];");
+						:}
+						sent
+						{:
+							Gen._goto(tag.getT());
+							Gen.label(((DoubleTag) RESULT).getF());
+							Gen.label(tag.getF());
+						:}
+						| FOR:tag variable:v IN array_dec DO
+						{:
+							String t0 = Gen.genTemp();
+							for (int i = 0; i < list.size(); i++) {
+								PLXC.out.println("\t" + t0 + "[" + i + "] = " + list.get(i)._1() + ";");
+							}
+							String t1 = Gen.genTemp();
+							PLXC.out.println("\t" + t1 + " = -1;");
+							Gen.label(tag.getT());
+							PLXC.out.println("\t" + t1 + " = " + t1 + " + 1;");
+							RESULT = new DoubleTag();
+							DoubleTag db = (DoubleTag) RESULT;
+							PLXC.out.println("\tif (" + t1 + " < " + list.size() + ") goto " + db.getT() +";");
+							Gen._goto(db.getF());
+							Gen.label(db.getT());
+							PLXC.out.println("\t" + v._1() + " = " + t0 + "[" + t1 + "];");
+							list.clear();
+						:}
+						sent
+						{:
+							Gen._goto(tag.getT());
+							Gen.label(((DoubleTag) RESULT).getF());
+							Gen.label(tag.getF());
+						:}
+            | PRINT LPAREN expression:e RPAREN SEMI
+              {:
+                Gen._print(e._1());
+              :}
+            | LCURLY sent_list RCURLY
+						| type:t IDENT:i SEMI
+						{:
+							VarTable.addVar(i, t);
+						:}
+						| type:t IDENT:i LSQU INTEGER:n RSQU SEMI
+						{:
+							List<Integer> size = new ArrayList<Integer>();
+							size.add(new Integer(n));
+							VarTable.addVar(i,t,size);
+						:}
+						| type:t IDENT:id LSQU INTEGER:n RSQU EQUAL array_dec SEMI
+						{:
+							List<Integer> size = new ArrayList<Integer>();
+							size.add(new Integer(n));
+							VarTable.addVar(id,t,size);
+
+							if (list.size() > VarTable.getSize(id)) {
+								Gen.error();
+								Gen.halt();
+								list.clear();
+							} else {
+								for (int i = 0; i < list.size(); i++) {
+									Gen.asig(new Tuple(id+"[" + i + "]", VarTable.getType(id)), list.get(i));
+								}
+								list.clear();
+							}
+						:}
+            ;
+
+else_sent  ::= // Epsilon
+            | ELSE sent
+            ;
+
+type			 ::= INT
+						{:
+							RESULT = "Integer";
+						:}
+						|	FLOAT
+						{:
+							RESULT = "Real";
+						:}
+						;
+
+expression ::= asig:a
+              {:
+                RESULT = a;
+              :}
+             | uni_op:a
+              {:
+                RESULT = a;
+              :}
+             | sub_exp:a
+              {:
+                RESULT = a;
+              :}
+						 | cast:a
+						 {:
+							 RESULT = a;
+						 :}
+             ;
+
+array_dec ::= LCURLY exp_list RCURLY;
+
+exp_list ::=  exp_list COMMA expression:e
+						{:
+							list.add(e);
+						:}
+						| expression:e
+						{:
+							list.add(e);
+						:}
+						;
+
+cast		  ::= CASTINT expression:e
+						{:
+							RESULT = Gen.cast("Integer", e);
+						:}
+						| CASTFLOAT expression:e
+						{:
+							RESULT = Gen.cast("Real", e);
+						:}
+						;
+
+// todo
+for_var   ::= variable
+            | asig
+            ;
+
+asig      ::= IDENT:i EQUAL expression:e
+            {:
+							Tuple id = new Tuple(i, VarTable.getType(i));
+              Gen.asig(id, e);
+              RESULT = id;
+            :}
+						| IDENT:id EQUAL array_dec
+						{:
+							if (list.size() > VarTable.getSize(id)) {
+								Gen.error();
+								Gen.halt();
+								list.clear();
+							} else {
+								for (int i = 0; i < list.size(); i++) {
+									Gen.asig(new Tuple(id+"[" + i + "]", VarTable.getType(id)), list.get(i));
+								}
+								list.clear();
+							}
+						:}
+						| IDENT:i LSQU expression:e1 RSQU EQUAL expression:e2
+						{:
+							Gen.check_range(i, e1);
+							Tuple res = new Tuple(i + "[" + e1._1() + "]", VarTable.getType(i));
+							Gen.asig(res, e2);
+							RESULT = res;
+						:}
+            ;
+
+uni_op    ::= MINUS expression:e
+            {:
+              e.setA("-" + e._1());
+              RESULT = e;
+            :} %prec UMINUS
+            | LPAREN uni_op:r RPAREN
+            {:
+              RESULT = r;
+            :}
+            ;
+
+sub_exp   ::= bin_op:a
+            {:
+              RESULT = a;
+            :}
+            | variable:a
+            {:
+              RESULT = a;
+            :}
+            | number:a
+            {:
+              RESULT = a;
+            :}
+            ;
+
+bin_op    ::= expression:e1 PLUS expression:e2
+            {:
+              Tuple t = new Tuple(Gen.genTemp(), null);
+              Gen.operate(t, e1, "+", e2);
+              RESULT = t;
+            :}
+						| expression:e1 MINUS expression:e2
+            {:
+              Tuple t = new Tuple(Gen.genTemp(), null);
+              Gen.operate(t, e1, "-", e2);
+              RESULT = t;
+            :}
+						| expression:e1 TIMES expression:e2
+            {:
+              Tuple t = new Tuple(Gen.genTemp(), null);
+              Gen.operate(t, e1, "*", e2);
+              RESULT = t;
+            :}
+						| expression:e1 DIVIDE expression:e2
+            {:
+              Tuple t = new Tuple(Gen.genTemp(), null);
+              Gen.operate(t, e1, "/", e2);
+              RESULT = t;
+            :}
+            | LPAREN bin_op:b RPAREN
+            {:
+              RESULT = b;
+            :}
+            ;
+
+
+variable  ::= IDENT:i
+            {:
+              RESULT = new Tuple(i, VarTable.getType(i));
+            :}
+						| IDENT:i LSQU expression:e1 RSQU
+						{:
+							Gen.check_range(i, e1);
+							Tuple res = new Tuple(i + "[" + e1._1() + "]", VarTable.getType(i));
+							Tuple t = new Tuple(Gen.genTemp(), VarTable.getType(i));
+							Gen.asig(t, res);
+							RESULT = t;
+						:}
+            | LPAREN variable:v RPAREN
+            {:
+              RESULT = v;
+            :}
+            ;
+
+number    ::= INTEGER:n
+            {:
+              RESULT = new Tuple(n, "Integer");
+            :}
+						| REAL:n
+						{:
+							RESULT = new Tuple(n, "Real");
+						:}
+            | LPAREN number:n RPAREN
+            {:
+              RESULT = n;
+            :}
+            ;
+
+condition ::= expression:e1 BEQUAL expression:e2
+              {:
+                RESULT = Gen.cond(Gen.EQ, e1._1(), e2._1());
+              :}
+            | expression:e1 NEQ expression:e2
+              {:
+                RESULT = Gen.cond(Gen.NEQ, e1._1(), e2._1());
+              :}
+            | expression:e1 LESS expression:e2
+              {:
+                RESULT = Gen.cond(Gen.LESS, e1._1(), e2._1());
+              :}
+            | expression:e1 LEQ expression:e2
+              {:
+                RESULT = Gen.cond(Gen.LEQ, e1._1(), e2._1());
+              :}
+            | expression:e1 MORE expression:e2
+              {:
+                RESULT = Gen.cond(Gen.MORE, e1._1(), e2._1());
+              :}
+            | expression:e1 MOEQ expression:e2
+              {:
+                RESULT = Gen.cond(Gen.MOEQ, e1._1(), e2._1());
+              :}
+            | NOT condition:c
+              {:
+                String aux = c.getT();
+                c.setT(c.getF());
+                c.setF(aux);
+                RESULT = c;
+              :}
+            | condition:c1
+              AND
+              {:
+                Gen.label(c1.getT());
+              :}
+              condition:c2
+              {:
+                Gen.label(c1.getF());
+                Gen._goto(c2.getF());
+                RESULT = c2;
+              :}
+            | condition:c1
+              OR
+              {:
+                Gen.label(c1.getF());
+              :}
+              condition:c2
+              {:
+                Gen.label(c1.getT());
+                Gen._goto(c2.getF());
+                RESULT = c2;
+              :}
+
+            | LPAREN condition:c RPAREN
+              {:
+                RESULT = c;
+              :}
+            ;

@@ -1,0 +1,308 @@
+// @author Alex J. Porras
+// University of Malaga, Spain
+// Language Processors
+
+import java_cup.runtime.*;
+
+action code {:
+  // Use this part in case you need to
+  // declare global variables or something like that
+:};
+
+parser code {:
+  @Override
+  public void report_error(String message, Object info){      // Syntax error handling message
+      Gen.error();
+      PLXC.out.println("\t# Syntax error");
+      Gen.halt();
+  }
+:}
+
+// terminals
+terminal SEMI;
+terminal IF;
+terminal ELSE;
+terminal LPAREN, RPAREN;
+terminal PRINT;
+terminal LCURLY, RCURLY;
+terminal PLUS, MINUS, TIMES, DIVIDE, UMINUS;
+terminal EQUAL, NOT, MORE, LESS;
+terminal AND, OR;
+terminal BEQUAL;
+terminal String WHILE, DO;
+terminal String IDENT;
+terminal String INTEGER;
+terminal DoubleTag FOR;
+
+// 2014
+terminal INT;
+terminal COMMA;
+
+// non terminals
+non terminal sent_list;
+non terminal sent;
+non terminal else_sent;
+non terminal String expression;
+non terminal DoubleTag condition;
+
+non terminal String variable;
+non terminal String number;
+non terminal String op;
+non terminal String uni_op;
+non terminal String bin_op;
+non terminal String for_var;
+non terminal String asig;
+non terminal String sub_exp;
+
+// 2014
+non terminal String type;
+
+// precedences
+precedence right EQUAL;
+precedence left  PLUS, MINUS;
+precedence left  TIMES, DIVIDE;
+precedence left  OR;
+precedence left  AND;
+precedence left  MORE, LESS;
+precedence left  IF;
+precedence left  ELSE;
+precedence right NOT, UMINUS; // unitary minus
+
+// the grammar
+sent_list ::= sent | sent_list sent;
+
+sent      ::= expression SEMI
+            | IF LPAREN condition:c RPAREN
+              {:
+                Gen.label(c.getT());
+                RESULT = Gen.genTag();
+              :}
+              sent
+              {:
+                Gen._goto((String) RESULT);
+                Gen.label(c.getF());
+              :}
+              else_sent
+              {:
+                Gen.label((String) RESULT);
+              :}
+            | WHILE:check LPAREN // check comes from lexer
+              {:
+                Gen.label(check);
+              :}
+              condition:c RPAREN
+              {:
+                Gen.label(c.getT());
+              :}
+              sent
+              {:
+                Gen._goto(check);
+                Gen.label(c.getF()); // out of the loop
+              :}
+            | DO:tag
+              {:
+                Gen.label(tag);
+              :}
+              sent WHILE LPAREN
+              condition:c RPAREN SEMI
+              {:
+                Gen.label(c.getT());
+                Gen._goto(tag);
+                Gen.label(c.getF()); // out of the loop
+              :}
+            | FOR:tag LPAREN for_var SEMI  // tag comes from lexer
+              {:
+                Gen.label(tag.getT()); // check condition
+              :}
+              condition:c SEMI
+              {:
+                Gen.label(tag.getF()); // modify variable
+              :}
+              expression
+              {:
+                Gen._goto(tag.getT());
+                Gen.label(c.getT());
+              :}
+              RPAREN sent
+              {:
+                Gen._goto(tag.getF());
+                Gen.label(c.getF()); // out of the loop
+              :}
+            | PRINT LPAREN expression:e RPAREN SEMI
+              {:
+                Gen._print(e);
+              :}
+            | LCURLY sent_list RCURLY
+            ;
+
+else_sent  ::= // Epsilon
+            | ELSE sent
+            ;
+
+expression ::= asig:a
+              {:
+                RESULT = a;
+              :}
+             | uni_op:a
+              {:
+                RESULT = a;
+              :}
+             | sub_exp:a
+              {:
+                RESULT = a;
+              :}
+             ;
+
+
+for_var   ::= variable:v
+            {:
+              RESULT = v;
+            :}
+            | asig:v
+            {:
+              RESULT = v;
+            :}
+            ;
+
+asig      ::= IDENT:i EQUAL expression:e
+            {:
+              Gen.asig(i, e);
+              RESULT = i;
+            :}
+            ;
+
+uni_op    ::= MINUS expression:e
+            {:
+              String t = Gen.genTemp();
+              Gen.operate(t,"-1", "*", e);
+              RESULT = t;
+            :} %prec UMINUS
+            | LPAREN uni_op:r RPAREN
+            {:
+              RESULT = r;
+            :}
+            ;
+
+sub_exp   ::= bin_op:a
+            {:
+              RESULT = a;
+            :}
+            | variable:a
+            {:
+              RESULT = a;
+            :}
+            | number:a
+            {:
+              RESULT = a;
+            :}
+            ;
+
+bin_op    ::= expression:e1 PLUS expression:e2
+            {:
+              String t = Gen.genTemp();
+              Gen.operate(t, e1, "+", e2);
+              RESULT = t;
+            :}
+						| expression:e1 MINUS expression:e2
+            {:
+              String t = Gen.genTemp();
+              Gen.operate(t, e1, "-", e2);
+              RESULT = t;
+            :}
+						| expression:e1 TIMES expression:e2
+            {:
+              String t = Gen.genTemp();
+              Gen.operate(t, e1, "*", e2);
+              RESULT = t;
+            :}
+						| expression:e1 DIVIDE expression:e2
+            {:
+              String t = Gen.genTemp();
+              Gen.operate(t, e1, "/", e2);
+              RESULT = t;
+            :}
+            | LPAREN bin_op:b RPAREN
+            {:
+              RESULT = b;
+            :}
+            ;
+
+variable  ::= IDENT:i
+            {:
+              RESULT = i;
+            :}
+            | LPAREN variable:v RPAREN
+            {:
+              RESULT = v;
+            :}
+            ;
+
+number    ::= INTEGER:n
+            {:
+              RESULT = n;
+            :}
+            | LPAREN number:n RPAREN
+            {:
+              RESULT = n;
+            :}
+            ;
+
+condition ::= expression:e1 BEQUAL expression:e2
+              {:
+                RESULT = Gen.cond(Gen.EQ, e1, e2);
+              :}
+            | expression:e1 NOT EQUAL expression:e2
+              {:
+                RESULT = Gen.cond(Gen.NEQ, e1, e2);
+              :}
+            | expression:e1 LESS expression:e2
+              {:
+                RESULT = Gen.cond(Gen.LESS, e1, e2);
+              :}
+            | expression:e1 LESS EQUAL expression:e2
+              {:
+                RESULT = Gen.cond(Gen.LEQ, e1, e2);
+              :}
+            | expression:e1 MORE expression:e2
+              {:
+                RESULT = Gen.cond(Gen.MORE, e1, e2);
+              :}
+            | expression:e1 MORE EQUAL expression:e2
+              {:
+                RESULT = Gen.cond(Gen.MOEQ, e1, e2);
+              :}
+            | NOT condition:c
+              {:
+                String aux = c.getT();
+                c.setT(c.getF());
+                c.setF(aux);
+                RESULT = c;
+              :}
+            | condition:c1
+              AND
+              {:
+                Gen.label(c1.getT());
+              :}
+              condition:c2
+              {:
+                Gen.label(c1.getF());
+                Gen._goto(c2.getF());
+                RESULT = c2;
+              :}
+            | condition:c1
+              OR
+              {:
+                Gen.label(c1.getF());
+              :}
+              condition:c2
+              {:
+                Gen.label(c1.getT());
+                Gen._goto(c2.getF());
+                RESULT = c2;
+              :}
+
+            | LPAREN condition:c RPAREN
+              {:
+                RESULT = c;
+              :}
+            ;

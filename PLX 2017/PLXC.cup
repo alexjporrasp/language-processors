@@ -1,0 +1,554 @@
+// author: Alex J. Porras
+// University of Malaga, Spain
+// Language Processors
+
+import java_cup.runtime.*;
+import java.util.*;
+
+action code {:
+	List<String> switch_var = new ArrayList<String>();
+	List<String> switch_end = new ArrayList<String>();
+	String not_break = "";
+	String temp_pt = "";
+	String temp_quest = "";
+	int pt_level = 0;
+:};
+
+parser code {:
+  @Override
+  public void report_error(String message, Object info){      // Syntax error handling message
+      Gen.error();
+      PLXC.out.println("\t# Syntax error");
+      Gen.halt();
+  }
+:}
+
+// terminals
+terminal SEMI;
+terminal IF;
+terminal ELSE;
+terminal LPAREN, RPAREN;
+terminal PRINT;
+terminal LCURLY, RCURLY;
+terminal PLUS, MINUS, TIMES, DIVIDE, UMINUS;
+terminal EQUAL, NOT, MORE, LESS, MOEQ, LEQ, NEQ;
+terminal AND, OR;
+terminal BEQUAL;
+terminal String WHILE, DO;
+terminal String IDENT;
+terminal String INTEGER;
+terminal DoubleTag FOR;
+
+// 2014
+terminal INT;
+terminal COMMA;
+terminal SWITCH, BREAK, CASE, DEFAULT;
+
+// 2017
+terminal COLON;
+terminal String QUESTION;
+terminal ELVIS;
+terminal REF;
+terminal POINTER;
+
+// non terminals
+non terminal sent_list;
+non terminal sent;
+non terminal else_sent;
+non terminal String expression;
+non terminal DoubleTag condition;
+
+non terminal String variable;
+non terminal String number;
+non terminal String op;
+non terminal String uni_op;
+non terminal String bin_op;
+non terminal String for_var;
+non terminal String asig;
+non terminal String sub_exp;
+
+// 2014
+// non terminal String type;
+non terminal String cond_quest;
+non terminal case_list;
+non terminal case_;
+non terminal opt_default;
+non terminal opt_break;
+non terminal opt_sent;
+non terminal pt_list;
+non terminal String pointer;
+non terminal bin_pt;
+non terminal String ref_op;
+non terminal String cond_expr;
+
+// precedences
+precedence left  QUESTION;
+precedence right EQUAL;
+precedence left  RPAREN;
+precedence left  OR;
+precedence left  AND;
+precedence left BEQUAL, NEQ;
+precedence left LESS, MORE, MOEQ, LEQ;
+precedence right ELVIS;
+precedence left  PLUS, MINUS;
+precedence left  TIMES, DIVIDE;
+precedence left  MORE, LESS;
+precedence left  IF;
+precedence left  ELSE;
+precedence right NOT, UMINUS; // unitary minus
+precedence left POINTER;
+
+// the grammar
+sent_list ::= sent | sent_list sent;
+
+sent      ::= expression SEMI
+            | IF LPAREN condition:c RPAREN
+              {:
+                Gen.label(c.getT());
+                RESULT = Gen.genTag();
+              :}
+              sent
+              {:
+                Gen._goto((String) RESULT);
+                Gen.label(c.getF());
+              :}
+              else_sent
+              {:
+                Gen.label((String) RESULT);
+              :}
+            | WHILE:check LPAREN // check comes from lexer
+              {:
+                Gen.label(check);
+              :}
+              condition:c RPAREN
+              {:
+                Gen.label(c.getT());
+              :}
+              sent
+              {:
+                Gen._goto(check);
+                Gen.label(c.getF()); // out of the loop
+              :}
+            | DO:tag
+              {:
+                Gen.label(tag);
+              :}
+              sent WHILE LPAREN
+              condition:c RPAREN SEMI
+              {:
+                Gen.label(c.getT());
+                Gen._goto(tag);
+                Gen.label(c.getF()); // out of the loop
+              :}
+            | FOR:tag LPAREN for_var SEMI  // tag comes from lexer
+              {:
+                Gen.label(tag.getT()); // check condition
+              :}
+              condition:c SEMI
+              {:
+                Gen.label(tag.getF()); // modify variable
+              :}
+              expression
+              {:
+                Gen._goto(tag.getT());
+                Gen.label(c.getT());
+              :}
+              RPAREN sent
+              {:
+                Gen._goto(tag.getF());
+                Gen.label(c.getF()); // out of the loop
+              :}
+						| SWITCH LPAREN expression:e RPAREN LCURLY
+						{:
+							switch_var.add(e);
+							switch_end.add(Gen.genTag());
+						:}
+						case_list opt_default RCURLY
+						{:
+							Gen.label(switch_end.get(switch_end.size() - 1));
+							switch_var.remove(switch_var.size() - 1);
+							switch_end.remove(switch_end.size() - 1);
+						:}
+            | PRINT LPAREN expression:e RPAREN SEMI
+              {:
+                Gen._print(e);
+              :}
+						| PRINT LPAREN cond_quest:q RPAREN SEMI
+							{:
+								Gen._print(q);
+							:}
+            | LCURLY sent_list RCURLY
+						| INT IDENT:id SEMI
+						| INT pt_list IDENT:id SEMI
+						{:
+							PointerTable.addPointer(id, pt_level);
+							pt_level = 0;
+						:}
+            ;
+
+pt_list		 ::= pt_list TIMES
+						{:
+							pt_level++;
+						:}
+						| TIMES
+						{:
+							pt_level++;
+						:}
+						;
+
+pointer   ::= TIMES pointer:id
+						{:
+							String t = Gen.genTemp();
+							Gen.asig(t, "* " + id);
+							pt_level++;
+							PointerTable.addPointer(t, 1);
+							RESULT = t;
+						:} %prec POINTER
+						| TIMES IDENT:id
+						{:
+							pt_level++;
+							temp_pt = id;
+							PointerTable.addPointer(id, 1);
+							RESULT = id;
+						:} %prec POINTER
+						;
+
+
+case_list  ::= case_list case_
+						| case_
+						;
+
+case_			 ::= CASE expression:e COLON
+						{:
+							RESULT = Gen.genTag();
+							String l = (String) RESULT;
+							PLXC.out.println("\tif (" + switch_var.get(switch_var.size() - 1) + " != " + e + ") goto " + l + ";");
+							if (!not_break.equals("")) {
+								Gen.label(not_break);
+								not_break = "";
+							}
+						:}
+						opt_sent opt_break
+						{:
+							Gen.label((String) RESULT);
+						:}
+						;
+
+opt_sent    ::= sent_list
+						|
+						;
+
+opt_break		::= BREAK SEMI
+						{:
+							Gen._goto(switch_end.get(switch_end.size() - 1));
+						:}
+						| // Epsilon
+						{:
+							not_break = Gen.genTag();
+							Gen._goto(not_break);
+						:}
+						;
+opt_default ::= DEFAULT COLON
+						{:
+							if (not_break.equals("")) {
+								Gen.label(Gen.genTag());
+							} else {
+								Gen.label(not_break);
+								not_break = "";
+							}
+						:}
+						opt_sent
+						| // Epsilon
+						;
+
+else_sent  ::= // Epsilon
+            | ELSE sent
+            ;
+
+
+
+expression ::= asig:a
+              {:
+                RESULT = a;
+              :}
+             | uni_op:a
+              {:
+                RESULT = a;
+              :}
+             | sub_exp:a
+              {:
+                RESULT = a;
+              :}
+             ;
+
+// conflict
+cond_quest ::=  condition:c QUESTION:end_tag
+							{:
+								Gen.label(c.getT());
+							:}
+							  cond_expr:e1
+							{:
+								temp_quest = Gen.genTemp();
+								Gen.asig(temp_quest, e1);
+								Gen._goto(end_tag);
+								Gen.label(c.getF());
+							:}
+							COLON cond_expr:e2
+							{:
+								Gen.asig(temp_quest, e2);
+								Gen.label(end_tag);
+								RESULT = temp_quest;
+							:}
+							| LPAREN cond_quest:q RPAREN
+							{:
+								RESULT = q;
+							:}
+							;
+
+cond_expr ::= expression:e1
+						{:
+							RESULT = e1;
+						:}
+						| cond_quest:c
+						{:
+							RESULT = c;
+						:}
+						;
+
+for_var   ::= variable:v
+            {:
+              RESULT = v;
+            :}
+            | asig:v
+            {:
+              RESULT = v;
+            :}
+            ;
+
+ref_op    ::= REF IDENT:i
+						{:
+							String t = Gen.genTemp();
+							Gen.asig(t, "& " + i);
+							RESULT = t;
+						:}
+						;
+
+asig      ::= IDENT:i EQUAL expression:e
+            {:
+              Gen.asig(i, e);
+              RESULT = i;
+            :}
+						| IDENT:i EQUAL cond_quest:q
+						{:
+							Gen.asig(i, q);
+              RESULT = i;
+						:}
+						| pointer:id EQUAL expression:e
+						{:
+							if (PointerTable.getLevel(temp_pt) - pt_level == PointerTable.getLevel(e)) {
+								Gen.asig("* " + id, e);
+								pt_level = 0;
+								temp_pt = "";
+							} else {
+								Gen.error();
+								PLXC.out.println("\t# " + PointerTable.getLevel(temp_pt) + " " + pt_level);
+								Gen.halt();
+							}
+						:}
+
+            ;
+
+
+
+uni_op    ::= MINUS expression:e
+            {:
+              String t = Gen.genTemp();
+              Gen.operate(t,"-1", "*", e);
+              RESULT = t;
+            :} %prec UMINUS
+            | LPAREN uni_op:r RPAREN
+            {:
+              RESULT = r;
+            :}
+            ;
+
+sub_exp   ::= bin_op:a
+            {:
+              RESULT = a;
+            :}
+            | variable:a
+            {:
+              RESULT = a;
+            :}
+            | number:a
+            {:
+              RESULT = a;
+            :}
+            ;
+
+bin_op    ::= expression:e1 PLUS expression:e2
+            {:
+							if (PointerTable.isPointer(e1) && PointerTable.isPointer(e2)){
+								String t = Gen.genTemp();
+								String t0 = Gen.genTemp();
+								Gen.asig(t0, "* " + e1);
+								String t1 = Gen.genTemp();
+								Gen.asig(t1, "* " + e2);
+								Gen.operate(t, t0, "+", t1);
+								RESULT = t;
+							} else {
+								String t = Gen.genTemp();
+								Gen.operate(t, e1, "+", e2);
+								RESULT = t;
+							}
+            :}
+						| expression:e1 MINUS expression:e2
+            {:
+							if (PointerTable.isPointer(e1) && PointerTable.isPointer(e2)){
+								String t = Gen.genTemp();
+								String t0 = Gen.genTemp();
+								Gen.asig(t0, "* " + e1);
+								String t1 = Gen.genTemp();
+								Gen.asig(t1, "* " + e2);
+								Gen.operate(t, t0, "-", t1);
+								RESULT = t;
+							} else {
+								String t = Gen.genTemp();
+								Gen.operate(t, e1, "-", e2);
+								RESULT = t;
+							}
+            :}
+						| expression:e1 TIMES expression:e2
+            {:
+							if (PointerTable.isPointer(e1) && PointerTable.isPointer(e2)){
+								String t = Gen.genTemp();
+								String t0 = Gen.genTemp();
+								Gen.asig(t0, "* " + e1);
+								String t1 = Gen.genTemp();
+								Gen.asig(t1, "* " + e2);
+								Gen.operate(t, t0, "*", t1);
+								RESULT = t;
+							} else {
+								String t = Gen.genTemp();
+								Gen.operate(t, e1, "*", e2);
+								RESULT = t;
+							}
+            :}
+						| expression:e1 DIVIDE expression:e2
+            {:
+							if (PointerTable.isPointer(e1) && PointerTable.isPointer(e2)){
+								String t = Gen.genTemp();
+								String t0 = Gen.genTemp();
+								Gen.asig(t0, "* " + e1);
+								String t1 = Gen.genTemp();
+								Gen.asig(t1, "* " + e2);
+								Gen.operate(t, t0, "/", t1);
+								RESULT = t;
+							} else {
+								String t = Gen.genTemp();
+								Gen.operate(t, e1, "/", e2);
+								RESULT = t;
+							}
+            :}
+						| expression:e1 ELVIS expression:e2
+						{:
+							String t = Gen.genTemp();
+							String l = Gen.genTag();
+							Gen.asig(t, e1);
+							PLXC.out.println("\tif (" + e1 + " != 0) goto " + l + ";");
+							Gen.asig(t, e2);
+							Gen.label(l);
+							RESULT = t;
+						:}
+            | LPAREN bin_op:b RPAREN
+            {:
+              RESULT = b;
+            :}
+            ;
+
+variable  ::= IDENT:i
+            {:
+              RESULT = i;
+            :}
+						| pointer:p
+						{:
+							RESULT = p;
+						:}
+						| ref_op:p
+						{:
+							RESULT = p;
+						:}
+            | LPAREN variable:v RPAREN
+            {:
+              RESULT = v;
+            :}
+            ;
+
+number    ::= INTEGER:n
+            {:
+              RESULT = n;
+            :}
+            | LPAREN number:n RPAREN
+            {:
+              RESULT = n;
+            :}
+            ;
+
+condition ::= expression:e1 BEQUAL expression:e2
+              {:
+                RESULT = Gen.cond(Gen.EQ, e1, e2);
+              :}
+            | expression:e1 NEQ expression:e2
+              {:
+                RESULT = Gen.cond(Gen.NEQ, e1, e2);
+              :}
+            | expression:e1 LESS expression:e2
+              {:
+                RESULT = Gen.cond(Gen.LESS, e1, e2);
+              :}
+            | expression:e1 LEQ expression:e2
+              {:
+                RESULT = Gen.cond(Gen.LEQ, e1, e2);
+              :}
+            | expression:e1 MORE expression:e2
+              {:
+                RESULT = Gen.cond(Gen.MORE, e1, e2);
+              :}
+            | expression:e1 MOEQ expression:e2
+              {:
+                RESULT = Gen.cond(Gen.MOEQ, e1, e2);
+              :}
+
+            | NOT condition:c
+              {:
+                String aux = c.getT();
+                c.setT(c.getF());
+                c.setF(aux);
+                RESULT = c;
+              :}
+            | condition:c1 AND
+              {:
+                Gen.label(c1.getT());
+              :}
+              condition:c2
+              {:
+                Gen.label(c1.getF());
+                Gen._goto(c2.getF());
+                RESULT = c2;
+              :}
+            | condition:c1 OR
+              {:
+                Gen.label(c1.getF());
+              :}
+              condition:c2
+              {:
+                Gen.label(c1.getT());
+                Gen._goto(c2.getF());
+                RESULT = c2;
+              :}
+
+            | LPAREN condition:c RPAREN
+              {:
+                RESULT = c;
+              :}
+            ;

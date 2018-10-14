@@ -1,0 +1,33 @@
+PLX 2015
+
+Floats y casting : 5 puntos
+Declaracion de array unidimensional sin desbordamiento: 5 pts
+Inicialización de arrays sin desbordamiento: 5 pts
+Igualación de arrays sin desbordamiento: 5 pts
+casteo entre arrays y variables: 10 pts
+sentencia for in que recorre una lista: 9 pts
+
+
+Veredicto: no vale la pena
+
+PLX 2016
+
+Eliminacion de comentarios: 5 pts
+Asignacion y operacion (+=, -=, *=, /=): 5 pts
+ ________________________________________________________
+| Declaracion de array unidimensional sin desbordamiento |
+| Inicialización de arrays sin desbordamiento            | = 5 pts 
+| Igualación de arrays sin desbordamiento                |
+---------------------------------------------------------- 
+
+Array multidimensional sin desbordamiento: 5 pts
+Inicializacion de arrays multidimensionales: 6 pts
+Igualación entre arrays: 4 pts
+
+Veredicto: Holly Shit
+
+JPLC
+
+Pasar de java a ensamblador con funciones y pilas de operaciones.
+
+Veredicto: Imposible

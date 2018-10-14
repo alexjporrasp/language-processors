@@ -1,0 +1,47 @@
+	x = 7;
+	y = 1;
+	t0 = & x;
+	p = t0;
+	t1 = & p;
+	q = t1;
+	t2 = & q;
+	r = t2;
+	t3 = & r;
+	s = t3;
+	y = 2;
+	t4 = * q;
+	error;
+	# 1 2
+	halt;
+	y = 3;
+	t5 = * r;
+	t6 = & y;
+	error;
+	# 1 4
+	halt;
+	y = 4;
+	t7 = * s;
+	t8 = * t7;
+	t9 = & y;
+	error;
+	# 1 7
+	halt;
+	y = 5;
+	t10 = * s;
+	t11 = * t10;
+	t12 = * t11;
+	error;
+	# 1 11
+	halt;
+	print x;
+	print y;
+	print p;
+	t13 = * q;
+	print t13;
+	t14 = * r;
+	t15 = * t14;
+	print t15;
+	t16 = * s;
+	t17 = * t16;
+	t18 = * t17;
+	print t18;
